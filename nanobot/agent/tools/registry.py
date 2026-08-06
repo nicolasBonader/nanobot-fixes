@@ -133,6 +133,12 @@ class ToolRegistry:
                     f"Error: Tool '{name}' not found.{hint} Available: {', '.join(self.tool_names)}"
                 )
             )
+        request_ctx = current_request_context()
+        if request_ctx is not None and request_ctx.enabled_tools is not None:
+            if name not in request_ctx.enabled_tools:
+                return None, params, ToolResult.error(
+                    f"Error: Tool '{name}' is not enabled for this turn"
+                )
         if not tool.available():
             return None, params, ToolResult.error(f"Error: Tool '{name}' is unavailable")
 
