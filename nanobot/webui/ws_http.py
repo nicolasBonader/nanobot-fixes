@@ -37,6 +37,9 @@ from nanobot.webui.file_preview import (
 )
 from nanobot.webui.gateway_tokens import GatewayTokenStore, token_response_payload
 from nanobot.webui.http_utils import (
+    accepts_gzip as _accepts_gzip,
+)
+from nanobot.webui.http_utils import (
     case_insensitive_header as _case_insensitive_header,
 )
 from nanobot.webui.http_utils import (
@@ -59,6 +62,9 @@ from nanobot.webui.http_utils import (
 )
 from nanobot.webui.http_utils import (
     is_localhost as _is_localhost,
+)
+from nanobot.webui.http_utils import (
+    is_trusted_proxy_authenticated_request as _is_trusted_proxy_authenticated_request,
 )
 from nanobot.webui.http_utils import (
     issue_route_secret_matches as _issue_route_secret_matches,
@@ -263,6 +269,8 @@ class GatewayHTTPHandler:
     # -- Token management ---------------------------------------------------
 
     def check_api_token(self, request: WsRequest) -> bool:
+        if getattr(request, "_nanobot_trusted_proxy_authenticated", False):
+            return True
         return self.tokens.check_api_token(request)
 
     # -- Main dispatch ------------------------------------------------------
@@ -272,6 +280,11 @@ class GatewayHTTPHandler:
         got, _ = _parse_request_path(request.path)
         started = time.perf_counter()
         response: Any | None = None
+        setattr(
+            request,
+            "_nanobot_trusted_proxy_authenticated",
+            _is_trusted_proxy_authenticated_request(connection, request.headers, self.config),
+        )
 
         try:
             response = await self._dispatch_resolved(connection, request, got)
@@ -326,7 +339,10 @@ class GatewayHTTPHandler:
 
         # Static SPA serving
         if self.static_dist_path is not None:
-            response = self._serve_static(got)
+            response = self._serve_static(
+                got,
+                accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
+            )
             if response is not None:
                 return response
 
@@ -372,11 +388,30 @@ class GatewayHTTPHandler:
     def _handle_bootstrap(self, connection: Any, request: Any) -> Response:
         secret = self.config.token_issue_secret.strip() or self.config.token.strip()
         is_local_browser = _is_local_browser_request(connection, request.headers)
-        if secret:
-            if not _issue_route_secret_matches(request.headers, secret):
-                return _http_error(401, "Unauthorized")
-        elif not is_local_browser:
-            return _http_error(403, "bootstrap is localhost-only")
+        is_proxy_authenticated = _is_trusted_proxy_authenticated_request(
+            connection,
+            request.headers,
+            self.config,
+        )
+        if not is_proxy_authenticated:
+            if secret:
+                if not _issue_route_secret_matches(request.headers, secret):
+                    return _http_error(401, "Unauthorized")
+            elif not is_local_browser:
+                return _http_error(403, "bootstrap is localhost-only")
+
+        if is_proxy_authenticated:
+            payload = {
+                "ws_path": _normalize_config_path(self.config.path),
+                "ws_url": self._bootstrap_ws_url(request),
+                "limits": self.ingress.bootstrap_limits(
+                    max_frame_bytes=self.config.max_message_bytes,
+                ),
+                "model_name": _resolve_bootstrap_model_name(self.runtime_model_name),
+                "runtime_surface": self._runtime_surface,
+                "runtime_capabilities": self._capabilities,
+            }
+            return _http_json_response(payload)
 
         api_token_allowed = bool(secret) or is_local_browser
         if not self.tokens.can_issue(include_api_token=api_token_allowed):
@@ -412,6 +447,8 @@ class GatewayHTTPHandler:
 
     def _bootstrap_ws_url(self, request: Any) -> str:
         headers = getattr(request, "headers", {}) or {}
+        if self.config.public_ws_url:
+            return self.config.public_ws_url
         host = _safe_host_header(_case_insensitive_header(headers, "Host"))
         if not host:
             host = _host_for_url(self.config.host, self.config.port)
@@ -1112,7 +1149,12 @@ class GatewayHTTPHandler:
 
     # -- Static file serving ------------------------------------------------
 
-    def _serve_static(self, request_path: str) -> Response | None:
+    def _serve_static(
+        self,
+        request_path: str,
+        *,
+        accept_encoding: str = "",
+    ) -> Response | None:
         assert self.static_dist_path is not None
         rel = request_path.lstrip("/")
         if not rel:
@@ -1130,15 +1172,28 @@ class GatewayHTTPHandler:
                 candidate = index
             else:
                 return None
-        try:
-            body = candidate.read_bytes()
-        except OSError as e:
-            self._log.warning("static: failed to read {}: {}", candidate, e)
-            return _http_error(500, "Internal Server Error")
         ctype, _ = mimetypes.guess_type(candidate.name)
         if ctype is None:
             ctype = "application/octet-stream"
-        if ctype.startswith("text/") or ctype in {"application/javascript", "application/json"}:
+        utf8_text = ctype.startswith("text/") or ctype in {
+            "application/javascript",
+            "application/json",
+        }
+        compressible = utf8_text or ctype == "image/svg+xml"
+        response_path = candidate
+        extra_headers: list[tuple[str, str]] = []
+        if compressible:
+            extra_headers.append(("Vary", "Accept-Encoding"))
+            gzip_candidate = candidate.with_name(f"{candidate.name}.gz")
+            if _accepts_gzip(accept_encoding) and gzip_candidate.is_file():
+                response_path = gzip_candidate
+                extra_headers.append(("Content-Encoding", "gzip"))
+        try:
+            body = response_path.read_bytes()
+        except OSError as e:
+            self._log.warning("static: failed to read {}: {}", response_path, e)
+            return _http_error(500, "Internal Server Error")
+        if utf8_text:
             ctype = f"{ctype}; charset=utf-8"
         if candidate.name == "index.html":
             cache = "no-cache"
@@ -1148,7 +1203,7 @@ class GatewayHTTPHandler:
             body,
             status=200,
             content_type=ctype,
-            extra_headers=[("Cache-Control", cache)],
+            extra_headers=[("Cache-Control", cache), *extra_headers],
         )
 
 

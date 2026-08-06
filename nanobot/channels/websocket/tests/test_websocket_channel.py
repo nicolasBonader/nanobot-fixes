@@ -13,7 +13,6 @@ from websockets.exceptions import ConnectionClosed
 from websockets.frames import Close
 
 from nanobot.bus.events import (
-    INBOUND_META_SESSION_READ_SCOPE,
     OUTBOUND_META_AGENT_UI,
     OutboundMessage,
 )
@@ -416,7 +415,6 @@ async def test_webui_message_envelope_marks_inbound_metadata(bus: MagicMock) -> 
     assert msg.channel == "websocket"
     assert msg.chat_id == "chat-1"
     assert msg.metadata["webui"] is True
-    assert INBOUND_META_SESSION_READ_SCOPE not in msg.metadata
     assert msg.metadata["webui_turn_id"] == "turn-1"
     assert msg.metadata["_wants_stream"] is True
     lines = read_transcript_lines("websocket:chat-1")
@@ -559,6 +557,34 @@ def test_only_bootstrap_tokens_mark_webui_connections(bus: MagicMock) -> None:
 
     assert webui_connection in channel._webui_connections
     assert client_connection not in channel._webui_connections
+
+
+@pytest.mark.asyncio
+async def test_webui_persists_sidebar_state_larger_than_http_request_line(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    channel = _ch(bus)
+    conn = AsyncMock()
+    channel._webui_connections.add(conn)
+    session_order = [f"websocket:{index:04d}-{'x' * 48}" for index in range(160)]
+    envelope = {
+        "type": "set_sidebar_state",
+        "state": {
+            "session_order": session_order,
+            "view": {"sort": "manual"},
+        },
+    }
+    assert len(json.dumps(envelope).encode()) > 8_192
+
+    await channel._dispatch_envelope(conn, "webui-client", envelope)
+
+    saved = json.loads((tmp_path / "webui" / "sidebar-state.json").read_text(encoding="utf-8"))
+    assert saved["session_order"] == session_order
+    assert saved["view"]["sort"] == "manual"
+    conn.send.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2547,6 +2573,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
     )
     config.tools.web.search.provider = "brave"
     config.tools.web.search.api_key = "brave-secret"
+    expected_timezone = config.agents.defaults.timezone
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setattr(
@@ -2587,7 +2614,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert body["agent"]["provider"] == "openai"
         assert body["agent"]["model_preset"] == "default"
         assert body["agent"]["max_tokens"] == 8192
-        assert body["agent"]["timezone"] == "UTC"
+        assert body["agent"]["timezone"] == expected_timezone
         assert "bot_name" not in body["agent"]
         assert "bot_icon" not in body["agent"]
         assert body["agent"]["tool_hint_max_length"] == 40

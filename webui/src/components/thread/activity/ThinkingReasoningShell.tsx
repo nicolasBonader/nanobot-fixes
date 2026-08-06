@@ -10,6 +10,8 @@ interface ThinkingReasoningShellProps {
   children: ReactNode;
   viewportRef: Ref<HTMLDivElement>;
   contentRef: Ref<HTMLDivElement>;
+  fadeTop: boolean;
+  fadeBottom: boolean;
   onToggle: () => void;
   onScroll: () => void;
 }
@@ -21,6 +23,8 @@ export function ThinkingReasoningShell({
   children,
   viewportRef,
   contentRef,
+  fadeTop,
+  fadeBottom,
   onToggle,
   onScroll,
 }: ThinkingReasoningShellProps) {
@@ -31,6 +35,7 @@ export function ThinkingReasoningShell({
     >
       <button
         type="button"
+        data-thread-disclosure=""
         className="group inline-flex min-h-5 items-center self-start gap-1.5 bg-transparent p-0"
         onClick={onToggle}
         aria-expanded={expanded}
@@ -47,8 +52,8 @@ export function ThinkingReasoningShell({
         </span>
         <span
           className={cn(
-            "inline-flex shrink-0 transition-transform [transition-duration:600ms] ease-out",
-            "motion-reduce:[transition-duration:220ms]",
+            "inline-flex shrink-0 transition-transform [transition-duration:220ms] ease-out",
+            "motion-reduce:transition-none",
             expanded && "rotate-180",
           )}
         >
@@ -65,7 +70,7 @@ export function ThinkingReasoningShell({
 
       <div
         className={cn(
-          "grid transition-[grid-template-rows,opacity] [transition-duration:600ms] ease-out motion-reduce:[transition-duration:220ms]",
+          "grid transition-[grid-template-rows,opacity] [transition-duration:220ms] ease-out motion-reduce:transition-none",
           expanded
             ? "grid-rows-[1fr] opacity-100"
             : "pointer-events-none grid-rows-[0fr] opacity-0",
@@ -75,8 +80,10 @@ export function ThinkingReasoningShell({
           <div
             ref={viewportRef}
             data-testid={expanded ? "agent-activity-scroll" : undefined}
+            data-fade-top={fadeTop}
+            data-fade-bottom={fadeBottom}
             onScroll={onScroll}
-            className="mt-1.5 max-h-[180px] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="activity-scroll-fade mt-1.5 max-h-[180px] overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             aria-hidden={!expanded}
           >
             <div ref={contentRef} className="flex flex-col gap-0.5">

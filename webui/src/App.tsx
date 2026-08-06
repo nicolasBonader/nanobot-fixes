@@ -14,6 +14,7 @@ import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Sidebar } from "@/components/Sidebar";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { ThreadShell } from "@/components/thread/ThreadShell";
+import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surface";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
 import { useSessions } from "@/hooks/useSessions";
@@ -70,7 +71,7 @@ type BootState =
       status: "ready";
       client: NanobotClient;
       token: string;
-      tokenExpiresAt: number;
+      tokenExpiresAt: number | null;
       modelName: string | null;
       ingressLimits: BootstrapResponse["limits"] | null;
       runtimeSurface: RuntimeSurface;
@@ -479,8 +480,8 @@ function PairingCodePopup({
       className={cn(
         "fixed right-4 top-[calc(0.75rem+env(safe-area-inset-top))] z-[70]",
         "w-[min(calc(100vw-2rem),24rem)] rounded-[24px]",
-        "border border-border/70 bg-popover/95 p-4 text-popover-foreground",
-        "shadow-[0_24px_70px_rgba(15,23,42,0.20)] backdrop-blur-xl",
+        floatingSurfaceElevationClassName,
+        "p-4",
         "animate-in fade-in-0 slide-in-from-top-2 duration-200",
       )}
     >
@@ -733,7 +734,9 @@ export default function App() {
         ? toRuntimeSurface(boot.runtime_surface)
         : fallbackSurface;
       const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
-      const tokenExpiresAt = bootstrapTokenExpiresAt(boot.expires_in);
+      const tokenExpiresAt = boot.expires_in
+        ? bootstrapTokenExpiresAt(boot.expires_in)
+        : null;
       if (runtimeHost.socketFactory) {
         client.updateUrl(url, runtimeHost.socketFactory);
       } else {
@@ -744,7 +747,7 @@ export default function App() {
         current.status === "ready" && current.client === client
           ? {
               ...current,
-              token: boot.api_token,
+              token: boot.api_token ?? "",
               tokenExpiresAt,
               modelName: boot.model_name ?? current.modelName,
               ingressLimits: boot.limits ?? current.ingressLimits,
@@ -752,7 +755,7 @@ export default function App() {
             }
           : current,
       );
-      return { token: boot.api_token, url };
+      return { token: boot.api_token ?? "", url };
     },
     [],
   );
@@ -787,8 +790,10 @@ export default function App() {
           setState({
             status: "ready",
             client,
-            token: boot.api_token,
-            tokenExpiresAt: bootstrapTokenExpiresAt(boot.expires_in),
+            token: boot.api_token ?? "",
+            tokenExpiresAt: boot.expires_in
+              ? bootstrapTokenExpiresAt(boot.expires_in)
+              : null,
             modelName: boot.model_name ?? null,
             ingressLimits: boot.limits ?? null,
             runtimeSurface,
@@ -813,7 +818,7 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (state.status !== "ready") return;
+    if (state.status !== "ready" || state.tokenExpiresAt === null) return;
     const client = state.client;
     const timer = window.setTimeout(async () => {
       try {
@@ -1591,6 +1596,17 @@ function Shell({
     [activeKey, navigate, sessions, sidebarState.archived_keys, updateSidebarState],
   );
 
+  const onReorderSessions = useCallback(
+    (sessionOrder: string[]) => {
+      void updateSidebarState((current) => ({
+        ...current,
+        session_order: sessionOrder,
+        view: { ...current.view, sort: "manual" },
+      }));
+    },
+    [updateSidebarState],
+  );
+
   const onToggleArchived = useCallback(() => {
     void updateSidebarState((current) => ({
       ...current,
@@ -1911,6 +1927,7 @@ function Shell({
     onTogglePin,
     onRequestRename,
     onToggleArchive,
+    onReorderSessions,
     onToggleGroup,
     onRequestRenameProject,
     onNewChatInProject,
@@ -1924,6 +1941,7 @@ function Shell({
     onToggleArchived,
     pinnedKeys: sidebarState.pinned_keys,
     archivedKeys: sidebarState.archived_keys,
+    sessionOrder: sidebarState.session_order,
     titleOverrides: sidebarState.title_overrides,
     projectNameOverrides: sidebarState.project_name_overrides,
     collapsedGroups: sidebarState.collapsed_groups,
@@ -2124,7 +2142,6 @@ function Shell({
                     onModelNameChange={onModelNameChange}
                     onSettingsChange={setSettingsSnapshot}
                     skills={skills}
-                    onWorkspaceSettingsChange={refreshWorkspaces}
                     onSectionChange={onSettingsSectionChange}
                     onLogout={onLogout}
                     onRestart={onRestart}
@@ -2175,7 +2192,10 @@ function Shell({
         {restartToast ? (
           <div
             role="status"
-            className="fixed left-1/2 top-[calc(0.75rem+env(safe-area-inset-top))] z-50 max-w-[calc(100vw-1rem)] -translate-x-1/2 rounded-full border border-border/70 bg-popover px-4 py-2 text-sm font-medium text-popover-foreground shadow-lg"
+            className={cn(
+              floatingSurfaceElevationClassName,
+              "fixed left-1/2 top-[calc(0.75rem+env(safe-area-inset-top))] z-50 max-w-[calc(100vw-1rem)] -translate-x-1/2 rounded-full px-4 py-2 text-sm font-medium",
+            )}
           >
             {restartToast}
           </div>

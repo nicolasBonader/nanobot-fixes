@@ -182,6 +182,7 @@ export function SessionMentionToken({
       testId={`${testIdPrefix}-session-mention-${mention.name}`}
       title={`Session: ${mention.title || mention.name}`}
       color={INLINE_TOKEN_HIGHLIGHT_COLOR}
+      className={variant === "composer" ? "font-normal" : undefined}
     >
       {label}
     </InlineTokenHighlight>
@@ -191,6 +192,7 @@ export function SessionMentionToken({
     <a
       href={`#/chat/${encodeURIComponent(mention.session_key)}`}
       className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+      style={{ textDecorationColor: INLINE_TOKEN_HIGHLIGHT_COLOR }}
     >
       {token}
     </a>
@@ -221,6 +223,7 @@ export function CliAppMentionToken({
       testId={`${testIdPrefix}-cli-mention-${app.name}`}
       title={t("thread.composer.mentions.cliTitle", { name: app.display_name || app.name })}
       color={color}
+      className={variant === "composer" ? "font-normal" : undefined}
     >
       <span
         className={cn("relative inline-block", showLogo && "text-transparent")}
@@ -277,6 +280,7 @@ export function McpPresetMentionToken({
       testId={`${testIdPrefix}-mcp-mention-${preset.name}`}
       title={t("thread.composer.mentions.mcpTitle", { name: preset.display_name || preset.name })}
       color={color}
+      className={variant === "composer" ? "font-normal" : undefined}
     >
       <span
         className={cn("relative inline-block", showLogo && "text-transparent")}
